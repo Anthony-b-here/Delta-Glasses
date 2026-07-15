@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Step 1 - GPS to Glasses</title>
+  <style>
+    body {
+      background: #111;
+      color: #eee;
+      font-family: monospace;
+      padding: 20px;
+      font-size: 18px;
+    }
+    button {
+      font-size: 18px;
+      padding: 15px;
+      width: 100%;
+      margin-bottom: 20px;
+    }
+    .value {
+      font-size: 28px;
+      color: #2fe38a;
+      margin: 10px 0;
+    }
+  </style>
+</head>
+<body>
+
+  <button id="connectBtn">Connect to glasses</button>
+
+  <div>BLE status: <span id="bleStatus">not connected</span></div>
+  <div class="value" id="latOut">lat: --</div>
+  <div class="value" id="lngOut">lng: --</div>
+  <div>sent: <span id="sentCount">0</span> updates</div>
+
+<script>
+
+// ---- The UUIDs. These are just ID numbers. They MUST match the .ino file. ----
+const SERVICE_UUID = "6e400001-b5a3-f393-e0a9-e50e24dcca9e";
+const RX_UUID      = "6e400002-b5a3-f393-e0a9-e50e24dcca9e";
+
+// ---- A place to remember the BLE "mailbox" once we connect. Empty for now. ----
+let rxChar = null;
+let count = 0;
+
+// ---- Runs when you tap the Connect button ----
+document.getElementById("connectBtn").onclick = async function () {
+  try {
+    // Pop up iOS's Bluetooth picker, only showing devices named "RaceHUD"
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ name: "RaceHUD" }],
+      optionalServices: [SERVICE_UUID]
+    });
+
+    // Open the radio link
+    const server  = await device.gatt.connect();
+    // Ask that link for our specific service, then our specific mailbox
+    const service = await server.getPrimaryService(SERVICE_UUID);
+    rxChar        = await service.getCharacteristic(RX_UUID);
+
+    document.getElementById("bleStatus").textContent = "connected";
+  } catch (err) {
+    document.getElementById("bleStatus").textContent = "failed: " + err.message;
+  }
+};
+
+// ---- Ask the phone to keep giving us GPS readings, forever ----
+navigator.geolocation.watchPosition(onNewFix, onGpsError, {
+  enableHighAccuracy: true,
+  maximumAge: 0
+});
+
+// ---- The browser calls THIS automatically, ~once per second ----
+function onNewFix(position) {
+  const lat = position.coords.latitude;
+  const lng = position.coords.longitude;
+
+  // Show it on the phone screen
+  document.getElementById("latOut").textContent = "lat: " + lat.toFixed(6);
+  document.getElementById("lngOut").textContent = "lng: " + lng.toFixed(6);
+
+  // Send it to the glasses
+  sendToGlasses(lat.toFixed(6) + "," + lng.toFixed(6));
+}
+
+function onGpsError(err) {
+  document.getElementById("latOut").textContent = "GPS error: " + err.message;
+}
+
+// ---- Turn text into bytes and push it over BLE ----
+async function sendToGlasses(text) {
+  if (rxChar === null) return;          // not connected yet, do nothing
+
+  const bytes = new TextEncoder().encode(text);
+  try {
+    await rxChar.writeValue(bytes);
+    count = count + 1;
+    document.getElementById("sentCount").textContent = count;
+  } catch (err) {
+    document.getElementById("bleStatus").textContent = "send failed";
+  }
+}
+
+</script>
+</body>
+</html>
